@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Provision notes for the 06-voice-live demo (Voice Live agent).
+# Azure AI Voice Live is a limited preview — provisioning is manual via the Foundry portal.
+# This script validates prerequisites and prints the required next steps.
+set -euo pipefail
+
+SUBSCRIPTION="cd091145-5ea2-4703-ba5d-41063b1d4308"
+RESOURCE_GROUP="rg-ai-103"
+FOUNDRY_ACCOUNT="ai-103-demos-resource"
+PROJECT_NAME="ai-103-demos"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/chat-client-py/.env"
+
+az account set --subscription "$SUBSCRIPTION"
+
+echo "==> Checking AI Services account capabilities..."
+CAPABILITIES=$(az rest \
+  --method GET \
+  --url "https://management.azure.com/subscriptions/${SUBSCRIPTION}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.CognitiveServices/accounts/${FOUNDRY_ACCOUNT}?api-version=2024-10-01" \
+  --query "properties.capabilities[].name" \
+  -o tsv 2>/dev/null || echo "")
+
+if echo "$CAPABILITIES" | grep -qi "VoiceLive"; then
+  VOICELIVE_ENDPOINT="https://${FOUNDRY_ACCOUNT}.services.ai.azure.com/"
+  echo "    Voice Live capability detected."
+  echo "==> Writing placeholder env vars to chat-client-py/.env..."
+  cat > "$ENV_FILE" <<ENVEOF
+AZURE_VOICELIVE_ENDPOINT=${VOICELIVE_ENDPOINT}
+AZURE_VOICELIVE_AGENT_ID=
+AZURE_VOICELIVE_PROJECT_NAME=${PROJECT_NAME}
+ENVEOF
+  echo "    written — fill in AZURE_VOICELIVE_AGENT_ID after creating the agent (see Next steps)."
+else
+  echo "    Voice Live capability not detected on this account."
+  echo "    Request preview access at: https://aka.ms/voicelive-preview"
+fi
+
+echo ""
+echo "Done."
+echo ""
+echo "Next steps (manual — Voice Live is a limited preview):"
+echo "  1. Request preview access if not already enabled: https://aka.ms/voicelive-preview"
+echo "  2. Open https://ai.azure.com and navigate to project ${PROJECT_NAME}."
+echo "  3. Build > Agents > New agent > enable Voice Live modality."
+echo "  4. Note the agent ID and set AZURE_VOICELIVE_AGENT_ID in chat-client-py/.env."
+echo "  5. Ensure a microphone and speakers are connected."
+echo "  6. Run: cd chat-client-py && .venv\Scripts\Activate.ps1 && python chat-client.py"

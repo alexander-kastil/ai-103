@@ -1,4 +1,3 @@
-from pydoc import text
 from dotenv import load_dotenv
 import os
 from azure.core.credentials import AzureKeyCredential
@@ -61,4 +60,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nInterrupted.")

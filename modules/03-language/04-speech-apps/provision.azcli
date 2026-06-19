@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Provision model deployments for the 04-speech-apps demo (Speaking Clock).
+# Deploys gpt-4o-transcribe (GlobalStandard) and tts (Standard) on the existing
+# AI Services account. Both are pay-per-use with no hourly commitment.
+# Run from any directory — paths are resolved relative to this script.
+set -euo pipefail
+
+SUBSCRIPTION="cd091145-5ea2-4703-ba5d-41063b1d4308"
+RESOURCE_GROUP="rg-ai-103"
+FOUNDRY_ACCOUNT="ai-103-demos-resource"
+TRANSCRIBE_DEPLOYMENT="gpt-4o-transcribe"
+SPEAK_DEPLOYMENT="tts"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/speaking-clock-py/.env"
+
+az account set --subscription "$SUBSCRIPTION"
+
+echo "==> Deploying gpt-4o-transcribe model..."
+az cognitiveservices account deployment create \
+  --name "$FOUNDRY_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --deployment-name "$TRANSCRIBE_DEPLOYMENT" \
+  --model-name gpt-4o-transcribe \
+  --model-version 2025-03-20 \
+  --model-format OpenAI \
+  --sku-capacity 1 \
+  --sku-name GlobalStandard \
+  --output none 2>/dev/null || echo "    already exists"
+
+echo "==> Deploying tts model..."
+az cognitiveservices account deployment create \
+  --name "$FOUNDRY_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --deployment-name "$SPEAK_DEPLOYMENT" \
+  --model-name tts \
+  --model-version 001 \
+  --model-format OpenAI \
+  --sku-capacity 1 \
+  --sku-name Standard \
+  --output none 2>/dev/null || echo "    already exists"
+
+AI_KEY=$(az cognitiveservices account keys list \
+  --name "$FOUNDRY_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "key1" -o tsv)
+
+echo "==> Writing env vars to speaking-clock-py/.env..."
+cat > "$ENV_FILE" <<ENVEOF
+AI_SERVICE_ENDPOINT=https://${FOUNDRY_ACCOUNT}.openai.azure.com/
+AI_SERVICE_KEY=${AI_KEY}
+TRANSCRIBE_MODEL_DEPLOYMENT=${TRANSCRIBE_DEPLOYMENT}
+SPEAK_MODEL_DEPLOYMENT=${SPEAK_DEPLOYMENT}
+ENVEOF
+echo "    written"
+
+echo ""
+echo "Done."
+echo "  Transcribe model : ${TRANSCRIBE_DEPLOYMENT}"
+echo "  TTS model        : ${SPEAK_DEPLOYMENT}"
+echo "  Endpoint         : https://${FOUNDRY_ACCOUNT}.openai.azure.com/"
+echo ""
+echo "Next steps:"
+echo "  1. Place time.wav in speaking-clock-py/ (a recording of 'What time is it?')."
+echo "  2. Run: cd speaking-clock-py && .venv\Scripts\Activate.ps1 && python speaking-clock.py"

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Deprovision the Foundry agent created by provision.azcli for the 02-language-mcp demo.
+# Does NOT delete the Foundry project, account, or model deployments.
+set -euo pipefail
+
+SUBSCRIPTION="cd091145-5ea2-4703-ba5d-41063b1d4308"
+FOUNDRY_ACCOUNT="ai-103-demos-resource"
+PROJECT_NAME="ai-103-demos"
+AGENT_NAME="language-text-agent"
+AGENT_API_VERSION="v1"
+
+PROJECT_ENDPOINT="https://${FOUNDRY_ACCOUNT}.services.ai.azure.com/api/projects/${PROJECT_NAME}"
+
+az account set --subscription "$SUBSCRIPTION"
+
+echo "==> Deleting Foundry agent (${AGENT_NAME})..."
+az rest \
+  --method delete \
+  --resource "https://ai.azure.com" \
+  --url "${PROJECT_ENDPOINT}/agents/${AGENT_NAME}?api-version=${AGENT_API_VERSION}" \
+  --output none 2>/dev/null || echo "    not found"
+
+echo ""
+echo "Done."

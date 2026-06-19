@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Deprovision model deployments created by provision.azcli for the 04-speech-apps demo.
+# Does NOT delete the Foundry account or project.
+set -euo pipefail
+
+SUBSCRIPTION="cd091145-5ea2-4703-ba5d-41063b1d4308"
+RESOURCE_GROUP="rg-ai-103"
+FOUNDRY_ACCOUNT="ai-103-demos-resource"
+TRANSCRIBE_DEPLOYMENT="gpt-4o-transcribe"
+SPEAK_DEPLOYMENT="tts"
+
+az account set --subscription "$SUBSCRIPTION"
+
+echo "==> Deleting gpt-4o-transcribe deployment..."
+az cognitiveservices account deployment delete \
+  --name "$FOUNDRY_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --deployment-name "$TRANSCRIBE_DEPLOYMENT" \
+  --output none 2>/dev/null || echo "    not found"
+
+echo "==> Deleting tts deployment..."
+az cognitiveservices account deployment delete \
+  --name "$FOUNDRY_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --deployment-name "$SPEAK_DEPLOYMENT" \
+  --output none 2>/dev/null || echo "    not found"
+
+echo ""
+echo "Done."

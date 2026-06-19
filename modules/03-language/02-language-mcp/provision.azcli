@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Provision the Foundry prompt agent for the 02-language-mcp demo (text analysis agent).
+# Creates a prompt agent backed by gpt-5.4. Add the Azure AI Language MCP tool
+# in the Foundry portal after running this script (see Next steps).
+# Run from any directory — paths are resolved relative to this script.
+set -euo pipefail
+
+SUBSCRIPTION="cd091145-5ea2-4703-ba5d-41063b1d4308"
+RESOURCE_GROUP="rg-ai-103"
+FOUNDRY_ACCOUNT="ai-103-demos-resource"
+PROJECT_NAME="ai-103-demos"
+AGENT_NAME="language-text-agent"
+CHAT_DEPLOYMENT="gpt-5.4"
+AGENT_API_VERSION="v1"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/text-agent-py/.env"
+PROJECT_ENDPOINT="https://${FOUNDRY_ACCOUNT}.services.ai.azure.com/api/projects/${PROJECT_NAME}"
+
+AGENT_INSTRUCTIONS="You are a text analysis assistant powered by Azure AI Language. Extract named entities with their category and confidence score. Detect and redact PII (names, phone numbers, email addresses, SSNs). Analyze sentiment and return positive/negative/neutral with a confidence score. Extract key phrases. Detect language. Always return structured results."
+
+az account set --subscription "$SUBSCRIPTION"
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+cat > "${TMP_DIR}/agent.json" <<JSON
+{
+  "name": "${AGENT_NAME}",
+  "definition": {
+    "kind": "prompt",
+    "model": "${CHAT_DEPLOYMENT}",
+    "instructions": "${AGENT_INSTRUCTIONS}",
+    "tools": []
+  }
+}
+JSON
+
+echo "==> Creating Foundry prompt agent (${AGENT_NAME})..."
+az rest \
+  --method post \
+  --resource "https://ai.azure.com" \
+  --url "${PROJECT_ENDPOINT}/agents?api-version=${AGENT_API_VERSION}" \
+  --body @"${TMP_DIR}/agent.json" \
+  --headers "Content-Type=application/json" \
+  --output none 2>/dev/null || echo "    already exists"
+
+FOUNDRY_ENDPOINT=$(az cognitiveservices account show \
+  --name "$FOUNDRY_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "properties.endpoint" -o tsv)
+
+echo "==> Writing env vars to text-agent-py/.env..."
+cat > "$ENV_FILE" <<ENVEOF
+FOUNDRY_ENDPOINT=${PROJECT_ENDPOINT}
+AGENT_NAME=${AGENT_NAME}
+ENVEOF
+echo "    written"
+
+echo ""
+echo "Done."
+echo "  Agent   : ${AGENT_NAME}"
+echo "  Endpoint: ${PROJECT_ENDPOINT}"
+echo ""
+echo "Next steps (manual — adds Language MCP tool to the agent):"
+echo "  1. Open https://ai.azure.com and navigate to project ai-103-demos."
+echo "  2. Build > Agents > ${AGENT_NAME} > Tools > Add tool > Azure AI Language."
+echo "  3. Select the ai-103-demos-resource Language service and save."
+echo "  4. Run: cd text-agent-py && .venv\Scripts\Activate.ps1 && python text-agent.py"

@@ -2,20 +2,15 @@ import os
 import re
 from pathlib import Path
 from dotenv import load_dotenv
-from azure.ai.textanalytics import TextAnalysisClient
-from azure.ai.textanalytics.models import (
-	AnalyzeTextEntitiesResult,
-	EntitiesActionContent,
-	MultiLanguageInput,
-	MultiLanguageTextInput,
-	TextEntityRecognitionInput,
-)
+from azure.ai.textanalytics import TextAnalyticsClient
 from azure.core.credentials import AzureKeyCredential
+
 
 def print_banner(title: str) -> None:
 	print("\n" + "=" * 80)
 	print(title)
 	print("=" * 80)
+
 
 def main() -> None:
 	root = Path(__file__).resolve().parent
@@ -33,24 +28,22 @@ def main() -> None:
 		print(f"Warning: MODEL_VERSION '{MODEL_VERSION}' is not valid; using 'latest'.")
 		MODEL_VERSION = "latest"
 
-	client = TextAnalysisClient(endpoint=AI_SERVICE_ENDPOINT, credential=AzureKeyCredential(AI_SERVICE_KEY))
+	client = TextAnalyticsClient(endpoint=AI_SERVICE_ENDPOINT, credential=AzureKeyCredential(AI_SERVICE_KEY))
 
-	ads_dir = root / "ads"
+	ads_dir = root.parent / "ads"
 	for path in sorted(ads_dir.glob("*.txt")):
 		text = path.read_text(encoding="utf-8").strip()
 		print_banner(f"Processing: {path.name}")
 
-		body = TextEntityRecognitionInput(
-			text_input=MultiLanguageTextInput(
-				multi_language_inputs=[MultiLanguageInput(id=path.stem, text=text, language="en")]
-			),
-			action_content=EntitiesActionContent(model_version=MODEL_VERSION),
+		results = client.recognize_entities(
+			documents=[{"id": path.stem, "text": text, "language": "en"}],
+			model_version=MODEL_VERSION,
 		)
-
-		result = client.analyze_text(body=body)
-		if isinstance(result, AnalyzeTextEntitiesResult) and result.results and result.results.documents:
-			doc = result.results.documents[0]
-			for entity in doc.entities:
+		for result in results:
+			if result.is_error:
+				print(f"Error: {result.error.code} - {result.error.message}")
+				continue
+			for entity in result.entities:
 				print(f"- {entity.text} | {entity.category}", end="")
 				if entity.subcategory:
 					print(f"/{entity.subcategory}", end="")
@@ -58,4 +51,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-	main()
+	try:
+		main()
+	except KeyboardInterrupt:
+		print("\nInterrupted.")

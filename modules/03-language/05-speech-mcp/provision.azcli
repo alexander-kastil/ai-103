@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Provision the Foundry prompt agent for the 05-speech-mcp demo (speech agent).
+# Creates a prompt agent backed by gpt-5.4. Add the Azure AI Speech MCP tool
+# in the Foundry portal after running this script (see Next steps).
+# Run from any directory — paths are resolved relative to this script.
+set -euo pipefail
+
+SUBSCRIPTION="cd091145-5ea2-4703-ba5d-41063b1d4308"
+RESOURCE_GROUP="rg-ai-103"
+FOUNDRY_ACCOUNT="ai-103-demos-resource"
+PROJECT_NAME="ai-103-demos"
+AGENT_NAME="speech-tools-agent"
+CHAT_DEPLOYMENT="gpt-5.4"
+AGENT_API_VERSION="v1"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/speech-client-py/.env"
+PROJECT_ENDPOINT="https://${FOUNDRY_ACCOUNT}.services.ai.azure.com/api/projects/${PROJECT_NAME}"
+
+AGENT_INSTRUCTIONS="You are a speech assistant powered by Azure AI Speech. You can synthesize text to speech using any available neural voice (e.g. en-GB-SoniaNeural), transcribe audio from a URL or file, and translate spoken language. When synthesizing, confirm the voice and confirm that audio was produced. When transcribing, return the full transcript text."
+
+az account set --subscription "$SUBSCRIPTION"
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+cat > "${TMP_DIR}/agent.json" <<JSON
+{
+  "name": "${AGENT_NAME}",
+  "definition": {
+    "kind": "prompt",
+    "model": "${CHAT_DEPLOYMENT}",
+    "instructions": "${AGENT_INSTRUCTIONS}",
+    "tools": []
+  }
+}
+JSON
+
+echo "==> Creating Foundry prompt agent (${AGENT_NAME})..."
+az rest \
+  --method post \
+  --resource "https://ai.azure.com" \
+  --url "${PROJECT_ENDPOINT}/agents?api-version=${AGENT_API_VERSION}" \
+  --body @"${TMP_DIR}/agent.json" \
+  --headers "Content-Type=application/json" \
+  --output none 2>/dev/null || echo "    already exists"
+
+echo "==> Writing env vars to speech-client-py/.env..."
+cat > "$ENV_FILE" <<ENVEOF
+FOUNDRY_ENDPOINT=${PROJECT_ENDPOINT}
+AGENT_NAME=${AGENT_NAME}
+ENVEOF
+echo "    written"
+
+echo ""
+echo "Done."
+echo "  Agent   : ${AGENT_NAME}"
+echo "  Endpoint: ${PROJECT_ENDPOINT}"
+echo ""
+echo "Next steps (manual — adds Speech MCP tool to the agent):"
+echo "  1. Open https://ai.azure.com and navigate to project ai-103-demos."
+echo "  2. Build > Agents > ${AGENT_NAME} > Tools > Add tool > Azure AI Speech."
+echo "  3. Select the ai-103-demos-resource Speech service and save."
+echo "  4. Run: cd speech-client-py && .venv\Scripts\Activate.ps1 && python speech-client.py"
