@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import base64
 from dotenv import load_dotenv
 
@@ -11,14 +12,41 @@ from openai.types.responses.response_input_param import McpApprovalResponse, Res
 
 
 def save_png_from_response(response, path):
+    output_text = (getattr(response, "output_text", "") or "").replace("\\u002b", "+").replace("\\u002B", "+")
+    match = re.search(r"data:image/png;base64,([A-Za-z0-9+/]+=*)", output_text)
+    if match:
+        b64 = match.group(1).rstrip("=")
+        b64 += "=" * (-len(b64) % 4)
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(b64))
+        return True
     for item in response.output:
+        if getattr(item, "type", None) == "mcp_call":
+            if getattr(item, "status", None) == "failed":
+                print(f"  MCP call '{getattr(item, 'name', '?')}' failed: {getattr(item, 'error', 'unknown error')}")
+                continue
+            output_str = getattr(item, "output", None)
+            if output_str:
+                try:
+                    for entry in json.loads(output_str):
+                        if isinstance(entry, dict) and entry.get("type") == "image":
+                            b64 = entry.get("data", "")
+                            if b64:
+                                with open(path, "wb") as f:
+                                    f.write(base64.b64decode(b64))
+                                return True
+                except Exception:
+                    pass
         blob = item.model_dump_json() if hasattr(item, "model_dump_json") else str(item)
-        blob = blob.replace("\\/", "/")
+        blob = blob.replace("\\/", "/").replace("\\u002b", "+").replace("\\u002B", "+")
         match = re.search(r"iVBORw0KGgo[A-Za-z0-9+/]+={0,2}", blob)
         if match:
-            with open(path, "wb") as file:
-                file.write(base64.b64decode(match.group(0)))
-            return True
+            try:
+                with open(path, "wb") as f:
+                    f.write(base64.b64decode(match.group(0)))
+                return True
+            except Exception:
+                pass
     return False
 
 
@@ -80,10 +108,6 @@ def main():
         )
         print(f"Agent created (id: {agent.id}, name: {agent.name}, version: {agent.version})")
 
-        # Create a conversation thread
-        conversation = openai_client.conversations.create()
-        print(f"Created conversation (id: {conversation.id})")
-
         # Offer three preset questions, one per MCP server
         questions = {
             "1": "Generate a QR code for https://www.integrations.at.",
@@ -92,48 +116,59 @@ def main():
         }
 
         try:
-            print("\nChoose a question:")
-            print("  Press 1 for the QR code server (generate a QR code)")
-            print("  Press 2 for the roastery server (Espresso Blend stock)")
-            print("  Press 3 for the Microsoft Learn server (FastMCP docs)")
-            choice = input("\n> ").strip() or "1"
-            question = questions.get(choice, questions["1"])
-            print(f"\nAsking: {question}")
+            while True:
+                print("\nChoose a question (or press Enter to exit):")
+                print("  1 - QR code server (generate a QR code)")
+                print("  2 - Roastery server (Espresso Blend stock)")
+                print("  3 - Microsoft Learn server (FastMCP docs)")
+                choice = input("\n> ").strip()
+                if not choice:
+                    break
+                question = questions.get(choice)
+                if not question:
+                    print("  Invalid choice, pick 1, 2, or 3.")
+                    continue
+                print(f"\nAsking: {question}")
 
-            response = openai_client.responses.create(
-                conversation=conversation.id,
-                input=question,
-                extra_body={"agent_reference": {"name": agent.name, "type": "agent_reference"}},
-            )
+                # A fresh conversation per question keeps each approval flow isolated
+                conversation = openai_client.conversations.create()
 
-            # Process any MCP approval requests that were generated
-            input_list: ResponseInputParam = []
-            for item in response.output:
-                if item.type == "mcp_approval_request":
-                    if item.server_label in ("api-specs", "roastery", "qr-code") and item.id:
-                        input_list.append(
-                            McpApprovalResponse(
-                                type="mcp_approval_response",
-                                approve=True,
-                                approval_request_id=item.id,
-                            )
+                response = openai_client.responses.create(
+                    conversation=conversation.id,
+                    input=question,
+                    extra_body={"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+                )
+
+                # Approve all MCP tool calls in a loop until the agent is done
+                while True:
+                    input_list: ResponseInputParam = [
+                        McpApprovalResponse(
+                            type="mcp_approval_response",
+                            approve=True,
+                            approval_request_id=item.id,
                         )
+                        for item in response.output
+                        if item.type == "mcp_approval_request"
+                        and item.server_label in ("api-specs", "roastery", "qr-code")
+                        and item.id
+                    ]
+                    if not input_list:
+                        break
+                    response = openai_client.responses.create(
+                        input=input_list,
+                        previous_response_id=response.id,
+                        extra_body={"agent_reference": {"name": agent.name, "type": "agent_reference"}},
+                    )
 
-            # Send the approval response back and retrieve a response
-            response = openai_client.responses.create(
-                input=input_list,
-                previous_response_id=response.id,
-                extra_body={"agent_reference": {"name": agent.name, "type": "agent_reference"}},
-            )
+                print(f"\nAgent response: {response.output_text}")
 
-            print(f"\nAgent response: {response.output_text}")
+                qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qr-code.png")
+                if save_png_from_response(response, qr_path):
+                    print(f"\nQR code saved to: {qr_path}")
 
-            qr_path = os.path.abspath("qr-code.png")
-            if save_png_from_response(response, qr_path):
-                print(f"\nQR code saved to: {qr_path}")
+                openai_client.conversations.delete(conversation_id=conversation.id)
         finally:
-            # Clean up resources by deleting the agent version and conversation
-            openai_client.conversations.delete(conversation_id=conversation.id)
+            # Clean up the agent version once the user is done testing
             project_client.agents.delete_version(agent_name=agent.name, agent_version=agent.version)
             print("\nAgent deleted")
 
