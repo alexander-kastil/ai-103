@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Deprovision Azure resources created by provision.azcli for the 04-foundry-iq demo.
+# Does NOT delete the Foundry project, account, or model deployments.
+set -euo pipefail
+
+SUBSCRIPTION="cd091145-5ea2-4703-ba5d-41063b1d4308"
+RESOURCE_GROUP="rg-ai-103"
+SEARCH_NAME="ai103demossearch"
+STORAGE_NAME="ai103demosstorage"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_CONFIG="${SCRIPT_DIR}/../../../.claude/deploy.config"
+
+az account set --subscription "$SUBSCRIPTION"
+
+echo "==> Deleting AI Search service (${SEARCH_NAME})..."
+az search service delete \
+  --name "$SEARCH_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --yes \
+  --output none 2>/dev/null || echo "    not found"
+
+echo "==> Deleting storage account (${STORAGE_NAME})..."
+az storage account delete \
+  --name "$STORAGE_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --yes \
+  --output none 2>/dev/null || echo "    not found"
+
+echo "==> Removing AI Search credentials from deploy.config..."
+if [ -f "$DEPLOY_CONFIG" ]; then
+  sed -i '/^AZURE_AI_SEARCH_ENDPOINT=/d' "$DEPLOY_CONFIG"
+  sed -i '/^AZURE_AI_SEARCH_API_KEY=/d' "$DEPLOY_CONFIG"
+  echo "    done"
+fi
+
+echo ""
+echo "Done."
+echo ""
+echo "Manual steps remaining:"
+echo "  - Delete fabrikam-audio-agent in Foundry portal: https://ai.azure.com"
+echo "    Build > Agents > fabrikam-audio-agent > Delete"
+echo "  - Delete the kb-fabrikam-audio knowledge base if it was created in AI Search."

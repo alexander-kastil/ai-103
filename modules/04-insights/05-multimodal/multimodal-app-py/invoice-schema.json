@@ -1,0 +1,36 @@
+{
+    "description": "Invoice data extractor",
+    "baseAnalyzerId": "prebuilt-documentAnalyzer",
+    "config": {
+        "returnDetails": true
+    },
+    "fieldSchema": {
+        "fields": {
+            "VendorName": {
+                "type": "string",
+                "method": "extract",
+                "description": "Name of the vendor or supplier"
+            },
+            "InvoiceDate": {
+                "type": "string",
+                "method": "extract",
+                "description": "Date the invoice was issued"
+            },
+            "InvoiceNumber": {
+                "type": "string",
+                "method": "extract",
+                "description": "Invoice or order number"
+            },
+            "SubTotal": {
+                "type": "string",
+                "method": "extract",
+                "description": "Sub-total amount before tax"
+            },
+            "TotalAmount": {
+                "type": "string",
+                "method": "extract",
+                "description": "Total amount due including tax"
+            }
+        }
+    }
+}

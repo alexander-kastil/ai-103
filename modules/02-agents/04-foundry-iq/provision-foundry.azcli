@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# Provision the Foundry IQ data-plane for the 04-foundry-iq demo (Fabrikam Audio).
+# Run AFTER provision.azcli, which creates the AI Search service, storage, container,
+# uploaded assets, and RBAC. This script creates the knowledge source, the knowledge
+# base, the project MCP connection, and the agent wired to that knowledge base.
+set -euo pipefail
+
+SUBSCRIPTION="cd091145-5ea2-4703-ba5d-41063b1d4308"
+RESOURCE_GROUP="rg-ai-103"
+SEARCH_NAME="ai103demossearch"
+STORAGE_NAME="ai103demosstorage"
+CONTAINER="fabrikam-audio"
+FOUNDRY_ACCOUNT="ai-103-demos-resource"
+PROJECT_NAME="ai-103-demos"
+
+KS_NAME="ks-fabrikam-audio"
+KB_NAME="kb-fabrikam-audio"
+AGENT_NAME="fabrikam-audio-agent"
+CONNECTION_NAME="conn-kb-fabrikam-audio"
+
+CHAT_DEPLOYMENT="gpt-5.4"
+CHAT_MODEL="gpt-5.4"
+EMBEDDING_DEPLOYMENT="text-embedding-3-small"
+EMBEDDING_MODEL="text-embedding-3-small"
+
+SEARCH_API_VERSION="2026-05-01-preview"
+CONNECTION_API_VERSION="2025-10-01-preview"
+AGENT_API_VERSION="v1"
+
+SEARCH_ENDPOINT="https://${SEARCH_NAME}.search.windows.net"
+PROJECT_ENDPOINT="https://${FOUNDRY_ACCOUNT}.services.ai.azure.com/api/projects/${PROJECT_NAME}"
+MCP_ENDPOINT="${SEARCH_ENDPOINT}/knowledgebases/${KB_NAME}/mcp?api-version=${SEARCH_API_VERSION}"
+PROJECT_RESOURCE_ID="/subscriptions/${SUBSCRIPTION}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.CognitiveServices/accounts/${FOUNDRY_ACCOUNT}/projects/${PROJECT_NAME}"
+
+AGENT_INSTRUCTIONS="You are a helpful AI assistant for Fabrikam Audio, specializing in home-audio and home-theater products such as speakers, soundbars, and headphones. You must ALWAYS search the knowledge base to answer questions about our products or product catalog. Provide detailed, accurate information and always cite your sources. If you don't find relevant information in the knowledge base, say so clearly."
+
+az account set --subscription "$SUBSCRIPTION"
+
+echo "==> Reading credentials..."
+SEARCH_KEY=$(az search admin-key show \
+  --service-name "$SEARCH_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "primaryKey" -o tsv)
+
+STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
+  --name "$STORAGE_NAME" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "connectionString" -o tsv)
+
+AOAI_ENDPOINT=$(az cognitiveservices account show \
+  --name "$FOUNDRY_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "properties.endpoint" -o tsv)
+
+AOAI_KEY=$(az cognitiveservices account keys list \
+  --name "$FOUNDRY_ACCOUNT" \
+  --resource-group "$RESOURCE_GROUP" \
+  --query "key1" -o tsv)
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+cat > "${TMP_DIR}/knowledge-source.json" <<JSON
+{
+  "name": "${KS_NAME}",
+  "kind": "azureBlob",
+  "description": "Fabrikam Audio product catalog source",
+  "azureBlobParameters": {
+    "connectionString": "${STORAGE_CONNECTION_STRING}",
+    "containerName": "${CONTAINER}",
+    "ingestionParameters": {
+      "embeddingModel": {
+        "kind": "azureOpenAI",
+        "azureOpenAIParameters": {
+          "resourceUri": "${AOAI_ENDPOINT}",
+          "deploymentId": "${EMBEDDING_DEPLOYMENT}",
+          "modelName": "${EMBEDDING_MODEL}",
+          "apiKey": "${AOAI_KEY}"
+        }
+      },
+      "contentExtractionMode": "minimal"
+    }
+  }
+}
+JSON
+
+cat > "${TMP_DIR}/knowledge-base.json" <<JSON
+{
+  "name": "${KB_NAME}",
+  "description": "Fabrikam Audio product catalog items",
+  "knowledgeSources": [
+    { "name": "${KS_NAME}" }
+  ],
+  "outputMode": "answerSynthesis",
+  "models": [
+    {
+      "kind": "azureOpenAI",
+      "azureOpenAIParameters": {
+        "resourceUri": "${AOAI_ENDPOINT}",
+        "deploymentId": "${CHAT_DEPLOYMENT}",
+        "modelName": "${CHAT_MODEL}",
+        "apiKey": "${AOAI_KEY}"
+      }
+    }
+  ],
+  "retrievalReasoningEffort": { "kind": "low" }
+}
+JSON
+
+cat > "${TMP_DIR}/connection.json" <<JSON
+{
+  "name": "${CONNECTION_NAME}",
+  "type": "Microsoft.MachineLearningServices/workspaces/connections",
+  "properties": {
+    "authType": "ProjectManagedIdentity",
+    "category": "RemoteTool",
+    "target": "${MCP_ENDPOINT}",
+    "isSharedToAll": true,
+    "audience": "https://search.azure.com/",
+    "metadata": { "ApiType": "Azure" }
+  }
+}
+JSON
+
+cat > "${TMP_DIR}/agent.json" <<JSON
+{
+  "name": "${AGENT_NAME}",
+  "definition": {
+    "kind": "prompt",
+    "model": "${CHAT_DEPLOYMENT}",
+    "instructions": "${AGENT_INSTRUCTIONS}",
+    "tools": [
+      {
+        "type": "mcp",
+        "server_label": "knowledge-base",
+        "server_url": "${MCP_ENDPOINT}",
+        "require_approval": "always",
+        "allowed_tools": [ "knowledge_base_retrieve" ],
+        "project_connection_id": "${CONNECTION_NAME}"
+      }
+    ]
+  }
+}
+JSON
+
+echo "==> Creating knowledge source (${KS_NAME})..."
+curl -sS -X PUT "${SEARCH_ENDPOINT}/knowledgesources/${KS_NAME}?api-version=${SEARCH_API_VERSION}" \
+  -H "Content-Type: application/json" \
+  -H "api-key: ${SEARCH_KEY}" \
+  --data @"${TMP_DIR}/knowledge-source.json" \
+  -o /dev/null -w "    HTTP %{http_code}\n"
+
+echo "==> Creating knowledge base (${KB_NAME})..."
+curl -sS -X PUT "${SEARCH_ENDPOINT}/knowledgebases/${KB_NAME}?api-version=${SEARCH_API_VERSION}" \
+  -H "Content-Type: application/json" \
+  -H "api-key: ${SEARCH_KEY}" \
+  --data @"${TMP_DIR}/knowledge-base.json" \
+  -o /dev/null -w "    HTTP %{http_code}\n"
+
+echo "==> Creating project MCP connection (${CONNECTION_NAME})..."
+az rest \
+  --method put \
+  --url "https://management.azure.com${PROJECT_RESOURCE_ID}/connections/${CONNECTION_NAME}?api-version=${CONNECTION_API_VERSION}" \
+  --body @"${TMP_DIR}/connection.json" \
+  --headers "Content-Type=application/json" \
+  --output none
+
+echo "==> Creating agent and connecting the knowledge base (${AGENT_NAME})..."
+az rest \
+  --method post \
+  --resource "https://ai.azure.com" \
+  --url "${PROJECT_ENDPOINT}/agents?api-version=${AGENT_API_VERSION}" \
+  --body @"${TMP_DIR}/agent.json" \
+  --headers "Content-Type=application/json" \
+  --output none
+
+echo ""
+echo "Done."
+echo "  Knowledge source : ${KS_NAME}"
+echo "  Knowledge base   : ${KB_NAME}"
+echo "  MCP connection   : ${CONNECTION_NAME}"
+echo "  Agent            : ${AGENT_NAME} (Foundry IQ tool, approval required)"
+echo ""
+echo "Next steps:"
+echo "  1. Confirm ingestion: knowledge source status should reach 'active' in the portal."
+echo "  2. Test in the Foundry portal playground (readme Step 8)."
+echo "  3. Run the Python client (readme Step 10)."

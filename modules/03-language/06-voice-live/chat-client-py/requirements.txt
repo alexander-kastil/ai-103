@@ -1,0 +1,6 @@
+python-dotenv
+azure-identity
+azure-ai-voicelive==1.2.0b4
+azure-ai-projects==2.0.0b4
+pyaudio
+aiohttp

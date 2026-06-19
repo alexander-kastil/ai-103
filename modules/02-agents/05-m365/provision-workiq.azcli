@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Provision the Work IQ service principal in the tenant for the 05-m365 demo.
+# Requires Global Administrator. Run once per tenant.
+# After running, complete the manual steps printed in "Next steps:" below.
+set -euo pipefail
+
+WORKIQ_APP_ID="fdcc1f02-fc51-4226-8753-f668596af7f7"
+
+echo "==> Provisioning Work IQ service principal..."
+az ad sp create --id "$WORKIQ_APP_ID" --output none 2>/dev/null || echo "    already exists"
+
+echo "==> Verifying service principal..."
+az ad sp show --id "$WORKIQ_APP_ID" \
+  --query "{displayName:displayName, appId:appId, id:id}" \
+  --output table
+
+echo ""
+echo "Done."
+echo ""
+echo "Next steps (manual — not scriptable):"
+echo "  1. Accept the EULA:          workiq accept-eula"
+echo "  2. Grant admin consent:      workiq auth consent"
+echo "     (interactive sign-in; only works after the SP above is provisioned)"
+echo "  3. Activate usage-based billing (Global Admin or Billing Admin):"
+echo "     https://admin.microsoft.com -> Copilot -> Cost Management -> Get Started"
+echo "     Select an Azure subscription, set spending limits, ensure users are in scope."
+echo "  4. Wait 15-30 minutes for billing provisioning before running:"
+echo "     workiq ask -q \"<your question>\""

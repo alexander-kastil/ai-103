@@ -1,0 +1,60 @@
+kind: workflow
+trigger:
+  kind: OnConversationStart
+  id: trigger_wf
+  actions:
+    - kind: SetVariable
+      id: set_job_applications
+      variable: Local.JobApplications
+      value: |-
+        =["Senior Backend Engineer - 8 years Python/Go, led a 6-person team, ex-FAANG, strong system-design portfolio.", "Junior Data Analyst - recent bootcamp grad, no commercial experience, solid SQL exercises, eager to learn.", "Cloud Solutions Architect - 12 years experience but resume is vague on specifics, no certifications listed, gaps unexplained."]
+    - kind: Foreach
+      id: for_each_application
+      items: =Local.JobApplications
+      value: Local.CurrentApplication
+      actions:
+        - kind: InvokeAzureAgent
+          id: invoke_screening_agent
+          agent:
+            name: Screening-Agent
+          conversationId: =System.ConversationId
+          input:
+            messages: =Local.CurrentApplication
+          output:
+            autoSend: true
+            messages: Local.ScreeningOutputText
+            responseObject: Local.ScreeningOutputJson
+        - kind: ConditionGroup
+          id: if_confidence
+          conditions:
+            - condition: =Local.ScreeningOutputJson.confidence > 0.6
+              id: if_confidence_true
+              actions:
+                - kind: ConditionGroup
+                  id: if_decision
+                  conditions:
+                    - condition: =Local.ScreeningOutputJson.decision = "Reject"
+                      id: if_decision_true
+                      actions:
+                        - kind: SendActivity
+                          id: send_rejection
+                          activity: Sending a standard rejection notice. No candidate email drafted.
+                  elseActions:
+                    - kind: InvokeAzureAgent
+                      id: invoke_response_agent
+                      agent:
+                        name: Response-Agent
+                      conversationId: =System.ConversationId
+                      input:
+                        messages: =Local.ScreeningOutputText
+                      output:
+                        autoSend: true
+                        messages: Local.ResponseOutputText
+          elseActions:
+            - kind: SendActivity
+              id: send_human_review
+              activity: |-
+                =Concat("The application screening has low confidence. Routing to a human recruiter for manual review: ", Local.CurrentApplication)
+id: ""
+name: Contoso-Job-Application-Triage
+description: ""

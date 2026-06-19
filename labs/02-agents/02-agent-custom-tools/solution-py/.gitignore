@@ -1,0 +1,6 @@
+.env
+.venv/
+labenv/
+__pycache__/
+*.pyc
+report_*.txt

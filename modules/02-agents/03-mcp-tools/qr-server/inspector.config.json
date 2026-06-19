@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "qr-code-stdio": {
+      "command": "uv",
+      "args": ["run", "server.py", "--stdio"]
+    },
+    "qr-code-http": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:3001/mcp"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+    "description": "Voicemail message analyzer",
+    "baseAnalyzerId": "prebuilt-audioAnalyzer",
+    "config": {
+        "returnDetails": true
+    },
+    "fieldSchema": {
+        "fields": {
+            "Caller": {
+                "type": "string",
+                "method": "generate",
+                "description": "Name or identity of the caller if mentioned"
+            },
+            "Summary": {
+                "type": "string",
+                "method": "generate",
+                "description": "Brief summary of the voicemail message"
+            },
+            "CallbackNumber": {
+                "type": "string",
+                "method": "extract",
+                "description": "Phone number the caller wants a callback on"
+            },
+            "Actions": {
+                "type": "array",
+                "method": "generate",
+                "description": "List of action items or requests from the caller",
+                "items": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}
