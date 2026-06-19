@@ -4,7 +4,6 @@ requests
 azure-identity
 uvicorn
 starlette
-sse-starlette
 fastapi
 azure-ai-projects>=2.0.0
 openai>=2.0.0
